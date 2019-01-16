@@ -1,0 +1,287 @@
+---
+title: "Stat 115 Lab 4"
+subtitle: "PCA, SVM, BWA"
+author: "Andy Shi"
+date: "February 13-14, 2018"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.align = "center")
+```
+
+## Roadmap
+
+- Dimension reduction: summarizing complicated data.
+- Classification: Predicting $y \in \{0, 1\}$ from $\mathbf{X}$.
+- Read mapping: finding regions of the genome where short reads map to.
+
+## Install and Load Packages
+
+```{r bioc, eval = FALSE}
+# install packages from bioconductor
+source("https://bioconductor.org/biocLite.R")
+biocLite("sva")
+biocLite("bladderbatch") # for the example data
+install.packages("class")
+install.packages("e1071")
+install.packages("ggplot2")
+install.packages("cowplot")
+install.packages("caret")
+# etc.
+```
+
+```{r libraries, warning = FALSE, message = FALSE}
+library(sva)
+library(bladderbatch)
+library(limma)
+library(ggplot2)
+library(cowplot)
+library(class)
+library(e1071)
+library(caret)
+```
+
+## Load Data
+
+- Gene expression data from investigation into bladder cancer.
+- Outcome: finding differentially expressed genes that are
+associated with cancer status (0/1 in the variable `hasCancer`).
+- Already normalized with RMA.
+
+```{r loaddata}
+data(bladderdata)
+pheno <- pData(bladderEset)
+pheno$hasCancer <- as.numeric(pheno$cancer == "Cancer")
+edata <- exprs(bladderEset)
+head(pheno)
+```
+
+## PCA
+
+- Finds the best linear combinations of the variables.
+- "Best" means optimally describing the variance.
+- Can produce lower-dimensional summaries of the data.
+- Useful for visualization, among other things.
+
+![Source:
+https://en.wikipedia.org/wiki/File:GaussianScatterPCA.svg](GaussianScatterPCA.png)
+
+## PCA
+
+- Main function: `prcomp`.
+- Definitely want to center and scale your data: e.g. for car data,
+you might have 4-8 cylinders, but weight could be measured in kilograms
+or grams.
+
+```{r pca}
+pca_raw <- prcomp(t(edata), center = TRUE, scale. = TRUE)
+edata_pc_df <- as.data.frame(pca_raw$x)
+edata_pc_df$batch <- as.factor(pheno$batch)
+edata_pc_df$hasCancer <- as.factor(pheno$hasCancer)
+#head(edata_pc_df)
+
+ggplot(edata_pc_df, aes(x = PC1, y = PC2, color = batch)) +
+    geom_point()
+ggplot(edata_pc_df, aes(x = PC1, y = PC2, color = hasCancer)) +
+    geom_point()
+```
+
+## PCA Variance Explained
+
+- Linear algebra result: $\text{trace}(\Sigma) = \sum_i \lambda_i$
+- $\text{trace}(\Sigma)$ can be thought of as total variance.
+- Variance of $PC_i$ is $\lambda_i$
+- So variance explained by PCs 1 to k is $\frac{\sum_{i = 1}^k \lambda_i}{\sum_{i = 1}^K \lambda_i}$
+- Denominator is sum of all eigenvalues
+- Given the formula here, can you write code to plot the variance
+explained from 1 to k, for all possible values of k
+$(1, 2, \ldots, 57)$?
+
+## PCA Variance Explained: Your turn
+
+```{r pca-var-explained}
+# your turn
+```
+
+## PCA After ComBat: Does it change?
+
+```{r combat}
+# your turn
+# run combat on edata to remove batch effect (see Lab 3)
+# combat_edata <- ComBat(...)
+```
+
+```{r pca-combat}
+# your turn
+# run PCA on the data from ComBat, draw a plot of the result
+```
+
+## SVM Overview
+
+- SVM is a type of classifier (can also be used for regression)
+- Predict binary $y$ from covariates $X$.
+- Different from clustering: in clustering, only have covariates $X$,
+no labels $y$.
+- Can run SVM on our data to predict cancer status.
+- `kernel = "linear"` means SVM draws a linear decision boundary. Will
+this work for our data?
+
+```{r svm-example, eval = FALSE}
+svm_result <- svm(t(combat_edata), as.factor(pheno$hasCancer),
+                  kernel = "linear")
+svm_result$fitted[1:5]
+confusionMatrix(svm_result$fitted, as.factor(pheno$hasCancer))$table
+```
+
+## Cross-validation
+
+- SVMs have a `cost` parameter: controls the penalty for
+misclassification
+- How to set? Need to use cross-validation.
+- Cross-validation: split up the data. Train on one portion, get an
+estimate of the error on the other.
+- Prevents overfitting
+
+![Source:
+https://en.wikipedia.org/wiki/Cross-validation_(statistics)](K-fold_cross_validation.jpg)
+
+## SVM: Toy example
+
+```{r simdata}
+# Simulate points in an annulus using rejection sampling. Won't actually
+# get n points per try. r1 and r2 are the inner and outer radii,
+# respectively.
+sim_annulus <- function(n, r1, r2) {
+    # don't worry about this code! Not needed for Stat115.
+    stopifnot(r1 < r2)
+    pts <- matrix(runif(2 * n, -1, 1), nrow = n, ncol = 2)
+    radii <- sqrt((pts[, 1])^2 + (pts[, 2])^2)
+    good_inds <- (radii >= r1) & (radii <= r2)
+    good_pts <- pts[good_inds,]
+    colnames(good_pts) = c("x", "y")
+    return(good_pts)
+}
+
+# generate the data
+set.seed(0) # set seed for reproducibility
+circ1 <- sim_annulus(2500, 0.3, 0.5)
+circ2 <- sim_annulus(1000, 0.8, 1)
+circ_dat <- rbind(circ1, circ2)
+type <- c(rep("Type 1", nrow(circ1)), rep("Type 2", nrow(circ2)))
+circ_df <- as.data.frame(circ_dat)
+circ_df$type <- as.factor(type)
+head(circ_df)
+ggplot(circ_df, aes(x = x, y = y, color = type)) + geom_point()
+```
+
+## SVM: Using Linear kernel
+
+```{r svm-linear}
+set.seed(0)
+shuffle_inds <- sample(1:nrow(circ_df), replace = FALSE)
+svm_tune <- tune(svm, type ~ ., data = circ_df[shuffle_inds,],
+                 kernel = "linear",
+                 ranges = list(cost = c(0.01, 0.1, 1, 10)),
+                 tunecontrol = tune.control(cross = 3))
+plot(svm_tune)
+svm_tune
+svm_circ <- svm(type ~ x + y, data = circ_df, kernel = "linear", cost = 0.1)
+confusionMatrix(svm_circ$fitted, type)$table
+plot(svm_circ, circ_df)
+```
+
+## SVM: Nonlinear
+
+- Power of SVM comes in when we use different kernels
+- Example: SVM can also draw circular decision boundaries.
+- Intuition:
+
+```{r svm-intuition, echo = FALSE, fig.width = 8}
+example_dat <- data.frame(x = c(1, -1.1, 2, -2.1), y = rep(0, 4),
+                          type = c(rep("Type 1", 2), rep("Type 2", 2)))
+p1 <- ggplot(example_dat, aes(x = x, y = y, color = type)) +
+    geom_point(size = 5) + labs(y = NULL) +
+    geom_hline(yintercept = 0, linetype = 4) +
+    theme(axis.line.y = element_blank(), axis.text.y = element_blank(),
+          axis.ticks.y = element_blank()) + guides(color = FALSE) +
+    ggtitle("Plot of Original Data")
+p2 <- ggplot(example_dat, aes(x = x^2, y = y, color = type)) +
+    geom_point(size = 5) + labs(y = NULL) +
+    geom_hline(yintercept = 0, linetype = 4) +
+    theme(axis.line.y = element_blank(), axis.text.y = element_blank(),
+          axis.ticks.y = element_blank()) + guides(color = FALSE) +
+    ggtitle("Plot of Data^2")
+plot_grid(p1, p2, nrow = 1)
+```
+
+
+## SVM: Using Radial Kernel on Toy Example
+
+```{r svm-radial}
+svm_circ_radial <- svm(type ~ x + y, data = circ_df, kernel = "radial")
+confusionMatrix(svm_circ_radial$fitted, circ_df$type)$table
+plot(svm_circ_radial, circ_df)
+```
+
+## BWA
+
+- 3 different versions:
+    + BWA-backtrack (`aln/samse/sampe`)
+    + BWA-SW (`bwasw`)
+    + BWA-MEM (`mem`)
+- Different recommendations depending on data:
+    + BWA-backtrack: Illumina reads up to 100bp
+    + BWA-SW / BWA-MEM: longer sequeces from 70bp to 1Mbp
+    + BWA-MEM latest version, recommended since generally faster and
+    more accurate
+    + BWA-MEM better than BWA-backgrack for 70-100bp Illumina reads
+- How to run:
+
+```
+bwa aln index.fa sample.fastq > sample.sai
+bwa samse index.fa sample.1M.sai sample.fastq > sample.sam
+samtools flagstat sample.sam
+```
+
+## Odyssey
+
+- What is Odyssey? Lots of computers stringed together
+- Advantage: More storage, can run many things in parallel (e.g. use
+10 computers to process 10 samples at a time)
+- Disadvantage: a lot of overhead to get things to work (have to make
+sure your stuff doesn't interfere with other people's stuff)
+- Can't just run stuff through the terminal on Odyssey---login node.
+- Have to submit job using srun or sbatch (preferred)
+- My tip: start off by requesting very few resources and doing a test
+run on a small file.
+
+## Odyssey Logistics
+
+- Login using ssh (Mac/Linux) or PuTTY (Windows)
+- Transfer files using Filezilla
+- Details: [https://www.rc.fas.harvard.edu/resources/odyssey-quickstart-guide/](https://www.rc.fas.harvard.edu/resources/odyssey-quickstart-guide/)
+- Matt will discuss more next week.
+
+## Example Submission Script
+
+- Save this to a file, e.g. `submit.sbatch`.
+- Submit by running `sbatch submit.sbatch`.
+
+```
+#!/bin/bash
+#SBATCH -n 1 # Number of cores requested
+#SBATCH -N 1 # Ensure that all cores are on one machine
+#SBATCH -t 15 # Runtime in minutes
+#SBATCH -p serial_requeue # Partition to submit to
+#SBATCH --mem=100 # Memory per cpu in MB (see also --mem-per-cpu)
+#SBATCH --open-mode=append
+#SBATCH -o output_%j.out # Standard out goes to this file
+#SBATCH -e error_%j.err # Standard err goes to this file
+
+LOAD_MODULES
+# example:
+module load bwa
+module load samtools
+YOUR_COMMANDS_HERE
+```

@@ -1,0 +1,117 @@
+---
+title: "STAT115 Homework 1"
+author: (your name)
+date: "`r Sys.Date()`"
+output:
+  rmarkdown::pdf_document
+vignette: >
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+# Part I-- Introduction to R
+This first question is an introduction to using RStudio and knitting your homework for final submission. We will be downloading a short nucleotide sequence and producing summary statistics associated with the string. The sequence originates from a mitochondrial control region from the homo sapiens genome and will be retrieved from [NCBI](https://www.ncbi.nlm.nih.gov/nuccore/MF320132.1).
+
+**1. Download and install the ape and seqinr packages. Include the installation commands in your R code but make sure the chunk does not get executed when you knit the document for final submission (hint: eval=FALSE).**
+```{r, eval=FALSE}
+
+```
+
+**2. Load the ape and seqinr packages into the current workspace. Hint: library().**
+```{r}
+
+```
+
+**3. Use the read.GenBank() function available in the ape library to read in the following accession number: MF320132. Use the as.character=TRUE option to return the nucleotide sequence. Assign the result to a variable named seq_1. **
+```{r}
+
+```
+
+**4. What species do these reads come from? Hint: use the attributes() command to view available attributes for seq_1 and then use the attr() command to access that.**
+```{r}
+
+```
+
+**5. How long is the nucleotide sequence? Hint: use the length function.**
+```{r}
+
+```
+
+**6. Report the overall nucleotide counts of the sequence. Hint: you may use the table function.**
+```{r}
+
+```
+
+**7. Replace the sequence with an edited version in which the "n" nucleotides have been removed. What is the length of the sequence now?**
+```{r}
+
+```
+
+**7. Again report the overall nucleotide counts of the modified sequence but instead convert these counts to proportions. Hint: use the prop.table function. What is the overall GC-content of the sequence (i.e. what proportion of the total sequence is composed of either G or C bases?).**
+```{r}
+
+```
+
+**8. Use the set.seed() function to set a seed such that your results may be reproducible (set.seed(12345)). Generate a random uniform vector (over the range 0-1) of length equal to the answer you found in question 5. Call this vector x.random.**
+```{r}
+
+```
+
+**9. Now create a logical vector indicating whether x.random is less than or equal to 0.5. Call this vector x.logical.**
+```{r}
+
+```
+
+**10. Finally print just those nucleotides corresponding to x.logical==TRUE. What is the GC-content of this new sequence?**
+```{r}
+
+```
+
+# Part II-- Introduction to python
+In this part, we will do a python programing exercise so that you start to learn and use python as soon as possible. The following code is intended to translate the DNA sequence to an equivalent amino acid sequence, please complete it and use the data below to test your result. The input is the dna_seq string and the intended output should match the protein_seq string. 
+
+```{r test-python, engine='python'}
+
+dna_seq = 'GCGTTTGACCGCGCTTGGGTGGCCTGGGACCCTGTGGGAGGCTTCCCCGGCGCCGAGAGCCCTGGCTGACGGCTGATGGGGAGGAGCCGGCGGGCGGAGAAGGCCACGGGCTCCCCAGTACCCTCACCTGCGCGGGATCGCTGCGGGAAACCAGGGGGAGCTTCGGCAGGGCCTGCAGAGAGGACAAGCGAAGTTAAGAGCCTAGTGTACTTGCCGCTGGGAGCTGGGCTAGGCCCCCAACCTTTGCCCTGAAGATGCTGGCAGAGCAGGATGTTGTAACGGGAAATGTCAGAAATACTGCAAGCAAACTGAAAACAACCCATCCATGTAGGAAAGAATAACACGG'
+
+protein_seq = 'MGRSRRAEKATGSPVPSPARDRCGKPGGASAGPAERTSEVKSLVYLPLGAGLGPQPLP_'
+
+def translate_DNA(sequence):
+    start_codon = 'ATG'
+    stop_codons = ('TAA', 'TAG', 'TGA')
+    codontable = {
+        'ATA':'I', 'ATC':'I', 'ATT':'I', 'ATG':'M',
+        'ACA':'T', 'ACC':'T', 'ACG':'T', 'ACT':'T',
+        'AAC':'N', 'AAT':'N', 'AAA':'K', 'AAG':'K',
+        'AGC':'S', 'AGT':'S', 'AGA':'R', 'AGG':'R',
+        'CTA':'L', 'CTC':'L', 'CTG':'L', 'CTT':'L',
+        'CCA':'P', 'CCC':'P', 'CCG':'P', 'CCT':'P',
+        'CAC':'H', 'CAT':'H', 'CAA':'Q', 'CAG':'Q',
+        'CGA':'R', 'CGC':'R', 'CGG':'R', 'CGT':'R',
+        'GTA':'V', 'GTC':'V', 'GTG':'V', 'GTT':'V',
+        'GCA':'A', 'GCC':'A', 'GCG':'A', 'GCT':'A',
+        'GAC':'D', 'GAT':'D', 'GAA':'E', 'GAG':'E',
+        'GGA':'G', 'GGC':'G', 'GGG':'G', 'GGT':'G',
+        'TCA':'S', 'TCC':'S', 'TCG':'S', 'TCT':'S',
+        'TTC':'F', 'TTT':'F', 'TTA':'L', 'TTG':'L',
+        'TAC':'Y', 'TAT':'Y', 'TAA':'_', 'TAG':'_',
+        'TGC':'C', 'TGT':'C', 'TGA':'_', 'TGG':'W'
+    }	
+    
+    start = sequence.find(start_codon)
+    codons = [] #Create a codon list to store codons generated from coding seq.
+    
+    # for i in range(start, len(sequence), 3):
+      # Finish the loop or write your own code to find the coding sequence which should
+      # start at the first start codon and stop at the occurrence of any stop codon.
+       
+    protein_sequence = ''.join([codontable[codon] for codon in codons]) #Translate condons to protein seq.
+    return "{0}_".format(protein_sequence)
+    
+print(protein_seq)
+```
+
+## Submission
+Please submit your solution directly on the canvas website. Please provide your code (.Rmd) and a pdf file for your final write-up. Please pay attention to the clarity and cleanness of your homework. Page numbers and figure or table numbers are highly recommended for easier reference.
+
+The teaching fellows will grade your homework and give the grades with feedback through canvas within one week after the due date. Some of the questions might not have a unique or optimal solution. TFs will grade those according to your creativity and effort on exploration, especially in the graduate-level questions.

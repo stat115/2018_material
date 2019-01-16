@@ -1,0 +1,185 @@
+---
+title: "STAT 115 Lab 12"
+subtitle: "MAGeCK"
+author: "Andy Shi"
+date: "April 17-19, 2018"
+output: slidy_presentation
+---
+
+## Overview of Homework 6
+
+This week, we will cover:
+
++ Part IV: Mutation Analysis.
+    - Python counting
+    - Fisher's exact test
++ Part V: Precision Medicine
+    - Search on the website
++ Part VI: CRISPR Screens
+    - MAGeCK
+
+## Part IV: Mutation Analysis
+
++ Count up how many mutations are present in all the patients, and group
+  by subtype.
++ What counts as a mutation?
+    1. Any mutation in the same gene gets counted together.
+    2. Any mutation in the same gene that has the same effect gets
+       counted together.
+    3. Only mutations at the exact same positions get counted together.
++ I think any of these is fine. Might be easier to use the first one.
+
+## How to Count
+
++ Will need to tell Python about which samples belong to which subtype.
++ Can hardcode it or write a csv file from R and read that in with Python.
++ Tip: check out the `Counter` class from the `collections` module in
+Python.
+
+```
+# Tally occurrences of words in a list
+cnt = Counter()
+for word in ['red', 'blue', 'red', 'green', 'blue', 'blue']:
+    cnt[word] += 1
+cnt
+## Counter({'blue': 3, 'red': 2, 'green': 1})
+```
+
++ You can do math things like add up two `Counter` objects.
++ Check out the documentation here: [https://docs.python.org/2/library/collections.html](https://docs.python.org/2/library/collections.html)
+
+
+## Fisher's exact test
+
++ For contingency tables.
++ Tests to see if the rows and columns are independent.
+
+|                        | Subtype  1 | Subtype 2 |
+|------------------------|------------|-----------|
+| Has mutation           | a          | b         |
+| Does not have mutation | n1 - a     | n2 - b    |
+| Total                  | n1         | n2        |
+
++ Example code looping through all rows:
+
+```{r fisher-exact-test}
+counts <- data.frame(gene = c("g1", "g2", "g3"),
+                     count1 = c(1, 2, 2),
+                     count2 = c(3, 3, 12))
+n1 <- 30
+n2 <- 30
+
+fisher_pvals <- rep(NA, nrow(counts))
+for (i in 1:nrow(counts)) {
+    a <- counts$count1[i]
+    b <- counts$count2[i]
+    dat <- rbind(c(a, b), c(n1 - a, n2 - b))
+    fisher_pvals[i] <- fisher.test(dat)$p.value
+}
+fisher_pvals
+```
+
+## Part VI: Analyzing CRISPR Screen Data with MAGeCK
+
++ If you have enough hard disk space, download the data to your own
+computer and run locally. Annoying to wait in queues for Odyssey.
+
+**Installation**:
+
+1. Download the source code from SourceForge.
+2. Uncompress the source code, e.g. `tar -zxvf mageck-0.5.7.tar.gz`
+3. `cd` into the folder where the source code is.
+4. Run the installation: `python setup.py install`
+
+
+## How to Run
+
++ First, have to convert the fastq files into counts for each gene.
+
+```
+mageck count -l library.csv -n OUT --sample-label Day0,Day23 \
+--fastq Day0_Rep1.fastq.gz,Day0_Rep2.fastq.gz Day23_Rep1.fastq.gz,Day23_Rep2.fastq.gz
+```
+
++ Then, test if the counts are significant or not.
+
+```
+mageck test -k OUT.count.txt -t Day23 -c Day0 -n OUT
+```
+
+
+## Q16: Basic QC for Read Mapping
+
+Look at the `countsummary.txt` file generated after `mageck count`. Look
+at documentation here for guide to QC metrics:
+[https://sourceforge.net/p/mageck/wiki/output/](https://sourceforge.net/p/mageck/wiki/output/)
+
+- Percentage of reads mapped to be $>$ 60%.
+- Zero counts $<$ 1%.
+- Gini index $<$ 0.1.
+
+## Q16: Basic QC for Ribosomal Genes
+
+If you knock out ribosomal genes, the cell should definitely die. Guide
+RNAs for ribosomal genes are often put as a negative control. Check the
+`genesummary.txt` for ribosomal genes.
+
+- This file contains the genes ranked by how negatively selected
+  they are (most to least).
+- Ribosomal genes start with "RP", so you can get all the rows that
+  have ribosomal genes using `grepl("^RP", genesummary$id)` on the
+  `id` column of the `genesummary.txt` file.
+- Another check: look at the results from DAVID. Do you see functional
+annotation clusters for ribosomal activity, e.g. protein synthesis?
+
+## Q16: Basic QC for Replicate Consistency
+
+- Count each replicate separately.
+- The resultant `count.txt` file will contain one column for each of
+  the 4 samples.
+- Plot the counts for Rep1 against Rep2 and look at the correlation.
+- It should be fairly high.
+- Code to count separately:
+
+```
+mageck count -l library.csv -n OUT_SEPARATE --sample-label Day0_Rep1,Day0_Rep2,Day23_Rep1,Day23_Rep2 \
+--fastq Day0_Rep1.fastq.gz Day0_Rep2.fastq.gz Day23_Rep1.fastq.gz Day23_Rep2.fastq.gz
+```
+
+## Q17: Which genes are positively or negatively selected?
+
++ Run the `mageck mle` subcommand.
+
+```
+mageck mle -k OUT.count_normalized.txt -d design_matrix.txt \
+-n OUT_MLE --threads 4
+```
+
++ Format of `design_matrix.txt`:
+```
+Samples        baseline        Day23
+Day0           1               0
+Day23          1               1
+```
+
++ If your computer has multiple cores, then you should use the
+  `--threads` argument and set that equal to the number of cores you
+  have.
++ Results are in the `gene_summary.txt` file.
++ Which genes are negatively selected: look for `beta` $< 0$ and `FDR`
+  $< 0.05$.
++ Which genes are positively selected: look for `beta` $> 0$ and `FDR`
+  $< 0.05$.
++ Pathways: paste the negatively selected and positively selected genes
+  into DAVID separately.
+    - Make sure that the organism of interest and the background is set
+      to *Homo sapiens*
+
+## Q18: Potential drug targets
+
++ Remove genes that are in the `PanEssential.txt` file.
+    - Pseudocode: `neg_genes[!(neg_genes %in% essential_genes)]`
++ Sort by p-value.
+    - `neg_genes_df[order(neg_genes_df$pvalue),]`
++ Take the top 10 and paste it in the OASIS genomics website.
+    - Make sure you select `GBM` for the disease.

@@ -1,0 +1,170 @@
+---
+title: "Stat 115 Lab 9"
+subtitle: "HMM, Linear Regression, LASSO"
+author: "Andy Shi"
+date: "March 27-29, 2018"
+output: slidy_presentation
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.align = "center")
+```
+
+## Outline of HW5
+
+1. Hidden Markov Model
+    - Implement forward-backward and viterbi algorithm
+    - Compare with R implementation
+    - HMM conceptual question
+2. Python programming
+    - Parse a tab-delimited file
+    - Similar to Python part in HW4
+3. Feature Selection & Epigenetic Gene Regulation
+    - Writing a small Python parsing script
+    - Linear regression
+    - PCA
+    - LASSO
+
+## Outline of Lab
+
+1. Fitting Hidden Markov Model
+2. Fitting linear regression
+3. Fitting LASSO
+4. If time/interest: debugging using a debugger
+    - PDB for Python
+    - RStudio built-in debugger for R
+
+## Install and Load Packages
+
+```{r install, eval = FALSE}
+# install packages from bioconductor
+#source("https://bioconductor.org/biocLite.R")
+install.packages("HMM")
+install.packages("glmnet")
+# etc.
+```
+
+```{r libraries, warning = FALSE, message = FALSE}
+library(HMM)
+library(glmnet)
+```
+
+## Hidden Markov Model Description
+
+![](https://upload.wikimedia.org/wikipedia/commons/thumb/4/43/HMMGraph.svg/623px-HMMGraph.svg.png)
+
+## Fitting it in R: Setup
+
+- Have to initialize an HMM object
+
+```{r hmm-setup}
+transProbs <- matrix(c(0.7, 0.4, 0.3, 0.6), nrow = 2)
+emissionProbs <- matrix(c(0.1, 0.6, 0.4, 0.3, 0.5, 0.1), nrow = 2)
+startProbs <- c(0.6, 0.4)
+hmm <- initHMM(c("Rainy","Sunny"), c("Walk","Shop", "Clean"),
+               startProbs, transProbs, emissionProbs)
+print(hmm)
+# Sequence of observations
+observations = c("Clean", "Shop", "Walk")
+```
+
+## Forward-Backward
+
+- Forward ($\alpha$): Pr(state at time k is X, and observe obs 1 to k)
+- Backward: At time k, Pr(observe obs k+1 to end | state is X)
+- Posterior: P(state at time k is X | all observations)
+
+```{r forward-backward}
+exp(forward(hmm, observations))
+exp(backward(hmm, observations))
+posterior(hmm, observations)
+```
+
+## Viterbi
+
+- Most likely path
+- Takes into account dependency between states
+
+```{r viterbi}
+viterbi(hmm, observations)
+```
+
+## Linear Regression
+
+- Objective: find best-fit line to data.
+- For each subject $i$, observe outcome $Y_i$ and vector of covariates $X_i$.
+- Math version:
+$$
+\min_{\beta} \sum_{i = 1}^n (Y_i - X_i \beta)^2
+$$
+- $\hat{\beta} = (X^T X)^{-1} X^T Y$
+
+## Linear Regression Example with DataFrames
+
+```{r lm}
+# 1 covariate
+mod1 <- lm(mpg ~ wt, data = mtcars)
+mod1
+
+# multiple covariates
+mod2 <- lm(mpg ~ wt + cyl, data = mtcars)
+mod2
+```
+
+
+## Linear Regression Example with Vectors
+
+```{r lm2}
+mpg <- mtcars$mpg
+wt <- mtcars$wt
+mod3 <- lm(mpg ~ wt)
+mod3
+```
+
+## LASSO
+
+- Remember for linear regression we try to optimize:
+$$
+\min_{\beta} \sum_{i = 1}^n (Y_i - X_i \beta)^2
+$$
+- Run into problems when there are too many covariates: $(X^T X)$ not invertible
+- LASSO's solution: penalize $\beta$ for being too big. Optimize:
+$$
+\min_{\beta} \sum_{i = 1}^n (Y_i - X_i \beta)^2 + \lambda \sum_{j = 1}^p |\beta_j|
+$$
+- Has the additional effect of setting some $\beta_j = 0$---feature selection!
+- Remember to normalize your data! Ex: weight could be measured in kg or g,
+which would change the magnitude of the coefficient. Can avoid by normalizing
+so each covariate has mean 0 and variance 1.
+
+## LASSO in R
+
+```{r lasso}
+data(QuickStartExample) # from glmnet package
+head(x, 3)
+head(y)
+fit <- glmnet(x, y)
+plot(fit)
+coef(fit, s = 0.1)
+```
+
+## Picking $\lambda$: Cross-Validation
+
+```{r lasso-cv}
+cvfit <- cv.glmnet(x, y)
+plot(cvfit)
+# min lambda
+cvfit$lambda.min
+# coefficients for min lambda
+coef(cvfit, s = "lambda.min")
+# residuals for min lambda
+resids <- y - predict(cvfit, newx = x, s = "lambda.min")
+plot(y, resids)
+```
+
+## Debugging with Debugger
+
+- Easier / better than using print statements.
+- R in RStudio: https://support.rstudio.com/hc/en-us/articles/205612627-Debugging-with-RStudio
+- Python: https://docs.python.org/2/library/pdb.html
+- Example adapted from: https://pythonconquerstheuniverse.wordpress.com/2009/09/10/debugging-in-python/

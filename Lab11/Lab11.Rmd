@@ -1,0 +1,301 @@
+---
+title: "STAT 115 Lab 11"
+subtitle: "TCGA, Tumor Subtypes, Methylation, Survival Analysis"
+author: "Andy Shi"
+date: "April 10-12, 2018"
+output: pdf_document
+---
+
+```{r libraries, results = "hide", message = FALSE}
+library(FirebrowseR)
+library(bladderbatch)
+library(limma)
+library(sva)
+library(dplyr)
+library(survival)
+library(glmnet)
+library(ggplot2)
+```
+
+# Overview of Homework 6
+
+This week, we will cover:
+
++ Part I: Accessing Data from TCGA
++ Part II: Tumor Subtype Analysis
+    - LIMMA to analyze differential gene expression and methylation
+    - K-Means clustering
+    - PCA for visualization
++ Part III: Survival Analysis
+    - Kaplan-Meier curves
+    - Cox proportional hazards model
+    - Gene signatures
+
+Next week:
+
++ Part IV: Mutation Analysis
++ Part V: Precision Medicine
++ Part VI: CRISPR Screens
+    - New topic this year
+    - MAGeCK
+    - Having some issues with the data right now, hopefully will be
+      resolved in the next few days.
+
+# Part I: Accessing Data from TCGA
+
+## Q1. TCGA Website
++ TCGA's website contains raw data that you can download
++ Should be fairly straightforward, involves searching on the
+  provided website.
+
+## Q2. Broad Firehose
++ Contains processed data that you can download and analyze
++ Access using firebrowse
++ R API: FirebrowseR
++ Code adapted from FirebrowseR vignette:
+  [https://github.com/mariodeng/FirebrowseR](https://github.com/mariodeng/FirebrowseR)
++ Let's download all breast cancer patients' clinical data.
+
+```{r firebrowser}
+# download all available cohorts
+cohorts <- Metadata.Cohorts(format = "csv")
+# show what cohorts are available
+#cohorts
+
+# have to do this because we can only receive 150 patients at a time
+all.Received <- FALSE
+page.Counter <- 1
+page.size <- 150
+brca_pats <- list()
+while(all.Received == FALSE) {
+    brca_pats[[page.Counter]] <- Samples.Clinical(format = "csv",
+            cohort = "BRCA", page_size = page.size, page = page.Counter)
+    if(page.Counter > 1) {
+        colnames(brca_pats[[page.Counter]]) <-
+            colnames(brca_pats[[page.Counter-1]])
+    }
+
+    if(nrow(brca_pats[[page.Counter]]) < page.size) {
+        all.Received = TRUE
+    } else {
+        page.Counter = page.Counter + 1
+    }
+}
+
+brca_pats <- do.call(rbind, brca_pats)
+dim(brca_pats)
+```
+
+Now, can you find out how many are alive? How about the mean and median
+age at initial diagnosis? Can you plot a histogram of the age at initial
+diagnosis?
+
+```{r firebrowser-student}
+# your turn
+table(brca_pats$vital_status)
+mean(brca_pats$age_at_initial_pathologic_diagnosis)
+median(brca_pats$age_at_initial_pathologic_diagnosis)
+hist(brca_pats$age_at_initial_pathologic_diagnosis)
+```
+
+# Part II: Tumor Subtype Analysis
++ Q3 and Q4: Using LIMMA to find differentially expressed genes. Please
+  review Lab 2.
++ You can assume that we have already performed normalization (RMA) and
+  batch effect removal (ComBat), so you can jump right in to using
+  LIMMA.
+
+## Expression Data: Clustering and PCA
+
+Task: using the bladder batch data, can you perform kmeans
+clustering (try $k = 2$ for now) on differentially expressed genes (FDR
+$< 0.05$ and log2-fold-change $> 2$), and then plot the result on a PCA
+plot, with the color of each point denoting its cluster and the shape
+denoting its cancer status?
+
+```{r part2-demo}
+set.seed(20180410)
+# I am running ComBat because this data has batch effect, but you don't
+# need this for your HW
+data(bladderdata)
+pheno <- pData(bladderEset)
+pheno$hasCancer <- as.numeric(pheno$cancer == "Cancer")
+edata <- exprs(bladderEset)
+model <- model.matrix(~hasCancer, data = pheno)
+combat_edata <- ComBat(dat = edata, batch = pheno$batch, mod = model)
+
+# run LIMMA to get the top genes (use data after running ComBat)
+# your turn
+fit <- lmFit(combat_edata, model)
+fit <- eBayes(fit)
+topgenes <- topTable(fit, coef = "hasCancer", p.value = 0.05, lfc = 2,
+                     number = Inf)
+
+# run kmeans clustering on top genes
+# your turn
+kmeans_res <- kmeans(t(combat_edata[rownames(topgenes),]),
+                     2, nstart = 10, iter.max = 100)
+
+# run PCA
+# your turn
+pca_raw <- prcomp(t(combat_edata), center = TRUE, scale. = TRUE)
+
+# assemble the data
+# your turn
+edata_pc_df <- as.data.frame(pca_raw$x)
+edata_pc_df$cluster <- as.factor(kmeans_res$cluster)
+edata_pc_df$hasCancer <- as.factor(pheno$hasCancer)
+
+# draw the plot
+# your turn
+ggplot(edata_pc_df, aes(x = PC1, y = PC2, color = cluster, shape =
+                        hasCancer)) + geom_point()
+```
+
+## Methylation Data
+
++ Logit-transform to map from $[0, 1] \to (-\infty, \infty)$. Then
+  analysis proceeds in the same way as microarray data with LIMMA.
+
+
+# Part III: Survival Analysis
+
++ $T_i$: the time to event for the ith individual.
++ $C_i$: the corresponding censoring time.
++ We observe $Y_i = \min(T_i, C_i)$ and $\delta_i = I(T_i \leq C_i)$
+  (i.e. $\delta_i = 1$ if $T_i \leq C_i$ and $\delta_i = 0$ if $T_i >
+  C_i$).
++ We also have predictors $X_i$ for each individual.
+
+## Kaplan-Meier Curve
+
++ A way to estimate the *survival function* $P(T_i > t)$ from our
+  observed data, taking into account the censoring.
++ We pass in $Y_i$ and $\delta_i$ into the `Surv` function.
+
+```{r kaplan-meier}
+# data wrangling to make this easier
+lung2 <- lung
+# 1 = died, 0 = still alive at last observation
+lung2$death <- lung$status - 1
+
+km_fit <- survfit(Surv(time, death) ~ sex, data = lung2)
+plot(km_fit, col = c("black", "red"), ylab = "Survival",
+     xlab = "Time (days)")
+legend("topright", legend = c("Male", "Female"), col =
+       c("black","red"), lty = 1)
+```
+
++ The log-rank test compares the survival curves across the observed
+  time frame. Significant p-value means the two curves are different.
+
+```{r logrank-test}
+survdiff(Surv(time, death) ~ sex, data = lung2)
+```
+
+## Cox proportional hazards model
+
++ The hazard function $\lambda(t)$ is defined as
+  $\lambda(t) = \lim_{\delta \to 0} \frac{1}{\delta} P(t \leq T < t +
+  \delta | T \geq t)$.
++ Interpretation: instantaneous rate at time $t$, given that the event
+  has not occurred prior to time $t$.
++ Cox proportional hazards model: $\lambda(t_i) = \lambda_0(t_i) \exp(
+  X_1 \beta_1 + \cdots + X_p \beta_p)$.
++ We are only interested in the $\beta$'s
++ We can perform estimation and inference without specifying
+  $\lambda_0(t_i)$. $\lambda_0(t_i)$ is the hazard when all $X_i = 0$,
+  and is called the baseline hazard.
+
+```{r cox}
+lung2$sex <- lung2$sex - 1
+cox_mod1 <- coxph(Surv(time, death) ~ sex, data = lung2)
+summary(cox_mod1)
+
+cox_mod2 <- coxph(Surv(time, death) ~ sex + age + ph.ecog, data = lung2)
+summary(cox_mod2)
+```
+
+## LASSO for Cox proportional hazards model
+
++ We can also apply LASSO to the Cox proportional hazards model when we
+  have too many predictors and/or we want to do model selection.
++ Code is very similar to last time: plug in a **matrix** of predictors
+  and a **vector** of responses. Note the `family = "cox"` argument.
+
+```{r cox-lasso}
+lung_nona <- na.omit(lung2)
+x <- as.matrix(lung_nona[,4:10])
+survobj <- Surv(lung_nona$time, lung_nona$death)
+cvfit <- cv.glmnet(x, survobj, family = "cox")
+plot(cvfit)
+coef(cvfit, s = "lambda.min")
+```
+
+## Data Wrangling
+
++ In your HW, you will have to merge data from two different datasets.
++ Practice: merge the survival information in `lung_surv` with the
+  predictors in `lung_predictors`. Use the rownames (`id_##`) to
+  distinguish between different subjects.
+
+```{r wrangling}
+lung_surv <- lung2[, c("time", "death")]
+lung_predictors <- select(lung2, -time, -death, -status)
+lung_predictors <- lung_predictors[order(lung_predictors$ph.ecog),]
+random_predictors <- matrix(rnorm(20 * nrow(lung2)), ncol = 20)
+colnames(random_predictors) <- paste0("predictor_", 1:20)
+lung_predictors <- cbind(lung_predictors, random_predictors)
+
+# merge the predictors with the survival information so you can
+# run a Cox regression using the predictors sex + ph.ecog
+# your turn
+lung3 <- merge(lung_surv, lung_predictors, by = "row.names")
+cox_mod3 <- coxph(Surv(time, death) ~ sex + ph.ecog, data = lung3)
+summary(cox_mod3)
+```
+
+## Randomly selecting predictors
+
++ In Q10, you will have to randomly sample predictors and see if the
+  resultant model performs better than a model based on top
+  differentially expressed genes.
++ How to compare models?
+    - Naively: just look at (an analog of) mean squared error.
+    - Not good because as we add more predictors, we will artificially
+      decrease the mean squared error.
+    - One alternative is the AIC
++ AIC: For a model with $k$ parameters, the AIC is $2k - 2
+  \textnormal{log-likelihood}$.
+    - Smaller is better
+    - Penalizes models that have too many useless predictors.
++ Let's practice! Above, we just merged a bunch of random predictors
+  with the original lung cancer data. Run 100 simulations to see if
+  randomly selecting 3 predictors does better than `cox_mod2`.
++ Let's break it down into steps:
+
+
+```{r choose-pred}
+set.seed(20180410)
+# your turn
+aics <- rep(NA, 100)
+for (i in 1:100) {
+    # sample which predictors you want to use
+    pred_index <- sample(1:ncol(lung_predictors), 3, replace = FALSE)
+    # subset the predictors
+    predictors_touse <- lung_predictors[, pred_index]
+    # merge predictors with survival information
+    data_touse <- merge(lung2[, c("time", "death")], predictors_touse,
+                        by = "row.names")
+    data_touse$Row.names <- NULL
+    # fit the model
+    mod <- coxph(Surv(time, death) ~ ., data = data_touse)
+    # extract the AIC
+    aics[i] <- AIC(mod)
+}
+
+# visualize
+hist(aics)
+abline(v = AIC(cox_mod1), lwd = 2, col = "red")
+mean(aics < AIC(cox_mod1))
+```
